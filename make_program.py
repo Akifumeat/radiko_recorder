@@ -7,7 +7,6 @@ from datetime import datetime, date, timedelta
 # TODO: 細かい入力の例外処理を行う
 # TODO: 適切な場所で画面のフラッシュを行う
 # TODO: tabulate が日本語に若干対応してなさそうなのに対応する
-# TODO: name が要らないのでどうするか検討する
 
 # ファイル名を含む場合
 def show_record(Plist):
@@ -61,7 +60,7 @@ def show_program_list():
         print('番組表がまだ作成されていません')
         return 
 
-    c.execute("select * from record_program")
+    c.execute("select title,filename,start,end,day,station from record_program")
     Plist = c.fetchall()
     show_record(Plist)
     c.close()
@@ -134,8 +133,31 @@ def delete_program_list():
     conn.close()
         
 def main():
-    print('getting program...')
-    radiko_record.make_programDB()
+    # make_programDB is very heavy operation 
+    # so it has to be estimated it is needed or not.
+    while(True):
+        try:
+            conn = sqlite3.connect('./radiko.db')
+            c = conn.cursor()
+            c.execute('SELECT date FROM radio_program')
+            date = c.fetchone()[0]
+            c.execute('select date from radio_program where date == 1')
+            print(c.fetchone())
+            c.close()
+            conn.commit()
+            conn.close()
+        except sqlite3.Error: 
+            print('getting program...')
+            radiko_record.make_programDB()
+        else:
+            break
+
+    date = datetime.strptime(date, '%Y%m%d%H%M')
+    today = datetime.today()
+    if today > date + timedelta(hours=3):
+        print('getting program...')
+        radiko_record.make_programDB()
+    
     while True:
         show_program_list()
         select = input('''
@@ -143,13 +165,12 @@ def main():
 2> 番組の消去
 3> 終了
 >''')
-
         if select == '1':
             make_program_list()
         elif select == '2':
             delete_program_list()
             pass
-        elif select == '3':
+        elif select == '3' or select == 'q':
             return 0
         else:
             print('1~3の数字を入力してください')

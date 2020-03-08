@@ -2,12 +2,13 @@ import requests
 import base64
 from bs4 import BeautifulSoup
 from datetime import datetime, date, timedelta
+from time import sleep
 import sqlite3
 import ffmpeg
 import subprocess
 
 def get_authtoken():
-    # key の取得もやってみたい
+    #TODO: key の取得もやってみたい
     key = 'bcd151073c03b352e1ef2fd66c32209da9ca0afa' 
     auth1_url = 'https://radiko.jp/v2/api/auth1'
     auth2_url = 'https://radiko.jp/v2/api/auth2'
@@ -75,10 +76,11 @@ def make_programDB():
     c = conn.cursor()
     # this function shuld be called so as to create new table.
     c.execute('DROP TABLE IF EXISTS radio_program')
-    c.execute('CREATE TABLE radio_program(title,start,end,day,station,PRIMARY KEY(title,start,end,day,station))')
+    c.execute('CREATE TABLE radio_program(title,start,end,day,station,date,PRIMARY KEY(title,start,end,day,station))')
 
     #get radio program title and time from start to end 
     today = datetime.today()
+    today_str = today.strftime("%Y%m%d%H%M")
     for i in station_list:
         for j in range(7):
             date_str = (today + timedelta(days=j)).strftime("%Y%m%d")
@@ -96,16 +98,107 @@ def make_programDB():
                 end = datetime.strptime(prog.get('to'), '%Y%m%d%H%M%S')
                 weekday = start.weekday()
 
-                # radio_program(title,start,end,day,station)
-                c.execute('INSERT INTO radio_program values(?,?,?,?,?)',([title,start.strftime('%H%M%S'),end.strftime('%H%M%S'),weekday,i]))
+                # radio_program(title,start,end,day,station,date)
+                c.execute('INSERT INTO radio_program values(?,?,?,?,?,?)',([title,start.strftime('%H%M%S'),end.strftime('%H%M%S'),weekday,i,today_str]))
 
     conn.commit()
     conn.close()
 
-   
-if __name__=="main":
+
+
+#def run_record():
+def calc_nearest_date(day):
+    today = datetime.today()
+    day_iter = today.weekday()
+    count = 0
+    while True:
+        if day == day_iter:
+            ret = today - timedelta(days=count)
+            return ret.strftime('%Y%m%d')
+        else:
+            count += 1
+            day_iter = (day_iter-1)%7
+
+def del_obsolete():
+    conn = sqlite3.connect('radiko.db')
+    c = conn.cursor()
+    c.execute('SELECT title,start,day,end FROM recorded_list')
+    Plist = c.fetchall()
+
+    today = datetime.today()
+    for i in Plist:
+        date = datetime.strptime(i[3],"%Y%m%d%H%M%S")
+        if today > date + timedelta(weeks=1):
+            c.execute('DELETE FROM recorded_list WHERE title=(?) AND start=(?) AND day=(?) AND end=(?)',(i))
+    conn.commit()
+    conn.close()
+
+def is_aleady_get(title,day):
+    del_obsolete()
+
+    conn = sqlite3.connect('radiko.db')
+    c =conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS recorded_list(title,filename,start,end,day,staiton)')
+    c.execute('SELECT title FROM recorded_list WHERE title==(?) AND day==(?)',([title,day]))
+    date = c.fetchone()
+    conn.commit()
+    conn.close()
+
+    return not date == None
+    
+def REC_radio(title,filename,start,end,day,station):
+    record_radio(filename,start,end,station)
+
+    conn = sqlite3.connect('radiko.db')
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS recorded_list(title,filename,start,end,day,staiton)')
+    c.execute('INSERT INTO recorded_list VALUES(?,?,?,?,?,?)',([title,filename,start,end,day,station]))
+    conn.commit()
+    conn.close()
+
+def rec_all():
+    conn = sqlite3.connect('radiko.db')
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS recorded_list(title,filename,start,end,day,staiton)')
+    c.execute('SELECT title,filename,start,end,day,station FROM record_program')
+    Plist = c.fetchall()
+    conn.commit()
+    conn.close()
+
+    today = datetime.today()
+    for i in Plist:
+        if is_aleady_get(i[0],i[4]):
+            continue
+
+        day = i[4]
+        rec_date = calc_nearest_date(day)
+        if datetime.strptime(rec_date,'%Y%m%d').weekday == day and datetime.strptime(rec_date+end,'%Y%m%d%H%M') < today:
+            rec_date = rec_date - timedelta(weeks=1)
+
+        title = i[0]
+        filename = i[1]
+        start = rec_date + i[2]
+        end = rec_date + i[3]
+        station = i[5]
+        REC_radio(title,filename,start,end,day,station)
+
+
+def main():
+    rec_list = []
+    # first time at start
+    rec_all()
+    # 音源を取得するなら取得する
+    #schedule.every(10).minutes.do(run)
+    # その曜日で録音するものを決める
+    #schedule.every().day.at("05:00").do(function, rec_list=rec_list)
+
+    #while True:
+    #    schedule.run_pending()
+    #    sleep(1)
+
+if __name__=="__main__":
     # __debug__
     #get_authtoken()
     #make_programDB()
-    record_radio('a','20200201113456','20200201120000','BAYFM78')
-
+   #record_radio('a','20200201113456','20200201120000','BAYFM78')
+   main()
